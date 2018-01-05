@@ -28,7 +28,7 @@ model = seq2seq_wrapper.Seq2Seq(xseq_len=xseq_len,
                                yseq_len=yseq_len,
                                xvocab_size=xvocab_size,
                                yvocab_size=yvocab_size,
-                               ckpt_path='ckpt/twitter/',
+                               ckpt_path='ckpt/twitter/seq2seq_twitter_1024x3h_i43000',
                                emb_dim=emb_dim,
                                num_layers=3
                                )

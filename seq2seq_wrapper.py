@@ -1,3 +1,4 @@
+
 import tensorflow as tf
 import numpy as np
 import sys
@@ -9,7 +10,9 @@ class Seq2Seq(object):
             xvocab_size, yvocab_size,
             emb_dim, num_layers, ckpt_path,
             lr=0.0001, 
-            epochs=100000, model_name='seq2seq_model'):
+            epochs=1, model_name='seq2seq_model'):
+        
+        #epochs=100000
 
         # attach these arguments to self
         self.xseq_len = xseq_len
@@ -22,6 +25,17 @@ class Seq2Seq(object):
         # build thy graph
         #  attach any part of the graph that needs to be exposed, to the self
         def __graph__():
+            
+# =============================================================================
+#             START: TEMPORARY FIX
+#             TypeError: can't pickle _thread.lock objects
+#             https://github.com/tensorflow/tensorflow/issues/11157
+#             This is a workaround. The proper fix is either make cells deep-copeable or get rid of the copy.deepcopy call.
+# =============================================================================
+#            setattr(tf.contrib.rnn.GRUCell, '__deepcopy__', lambda self, _: self)
+#            setattr(tf.contrib.rnn.BasicLSTMCell, '__deepcopy__', lambda self, _: self)
+#            setattr(tf.contrib.rnn.MultiRNNCell, '__deepcopy__', lambda self, _: self)
+            # END: TEMPORARY FIX
 
             # placeholders
             tf.reset_default_graph()
@@ -38,15 +52,27 @@ class Seq2Seq(object):
             #  decoder inputs : 'GO' + [ y1, y2, ... y_t-1 ]
             self.dec_ip = [ tf.zeros_like(self.enc_ip[0], dtype=tf.int64, name='GO') ] + self.labels[:-1]
 
-
             # Basic LSTM cell wrapped in Dropout Wrapper
             self.keep_prob = tf.placeholder(tf.float32)
+            
+            
             # define the basic cell
-            basic_cell = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(
-                    tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(emb_dim, state_is_tuple=True),
+            basic_cell = tf.nn.rnn_cell.DropoutWrapper(
+                    tf.nn.rnn_cell.BasicLSTMCell(emb_dim, state_is_tuple=True),
                     output_keep_prob=self.keep_prob)
             # stack cells together : n layered model
-            stacked_lstm = tf.contrib.rnn.core_rnn_cell.MultiRNNCell([basic_cell]*num_layers, state_is_tuple=True)
+            stacked_lstm = tf.nn.rnn_cell.MultiRNNCell([basic_cell]*num_layers, state_is_tuple=True)
+            
+
+            '''
+            # define the basic cell
+            basic_cell = tf.contrib.rnn.DropoutWrapper(
+                    tf.contrib.rnn.BasicLSTMCell(emb_dim, state_is_tuple=True),
+                    output_keep_prob=self.keep_prob)
+            # stack cells together : n layered model
+            stacked_lstm = tf.contrib.rnn.MultiRNNCell([basic_cell]*num_layers, state_is_tuple=True)
+            '''
+
 
 
             # for parameter sharing between training model
@@ -54,13 +80,13 @@ class Seq2Seq(object):
             with tf.variable_scope('decoder') as scope:
                 # build the seq2seq model 
                 #  inputs : encoder, decoder inputs, LSTM cell type, vocabulary sizes, embedding dimensions
-                self.decode_outputs, self.decode_states = tf.contrib.legacy_seq2seq.embedding_rnn_seq2seq(self.enc_ip,self.dec_ip, stacked_lstm,
+                self.decode_outputs, self.decode_states = tf.nn.seq2seq.embedding_rnn_seq2seq(self.enc_ip,self.dec_ip, stacked_lstm,
                                                     xvocab_size, yvocab_size, emb_dim)
                 # share parameters
                 scope.reuse_variables()
                 # testing model, where output of previous timestep is fed as input 
                 #  to the next timestep
-                self.decode_outputs_test, self.decode_states_test = tf.contrib.legacy_seq2seq.embedding_rnn_seq2seq(
+                self.decode_outputs_test, self.decode_states_test = tf.nn.seq2seq.embedding_rnn_seq2seq(
                     self.enc_ip, self.dec_ip, stacked_lstm, xvocab_size, yvocab_size,emb_dim,
                     feed_previous=True)
 
@@ -70,21 +96,21 @@ class Seq2Seq(object):
             # weighted loss
             #  TODO : add parameter hint
             loss_weights = [ tf.ones_like(label, dtype=tf.float32) for label in self.labels ]
-            self.loss = tf.contrib.legacy_seq2seq.sequence_loss(self.decode_outputs, self.labels, loss_weights, yvocab_size)
+            self.loss = tf.nn.seq2seq.sequence_loss(self.decode_outputs, self.labels, loss_weights, yvocab_size)
             # train op to minimize the loss
             self.train_op = tf.train.AdamOptimizer(learning_rate=lr).minimize(self.loss)
 
-        sys.stdout.write('<log> Building Graph ')
+        sys.stdout.write('<log> Started Building Graph... ')
         # build comput graph
         __graph__()
-        sys.stdout.write('</log>')
+        sys.stdout.write('COMPLETE </log>')
 
 
 
-    '''
-        Training and Evaluation
+        #==================================
+        #Training and Evaluation
 
-    '''
+  
 
     # get the feed dictionary
     def get_feed(self, X, Y, keep_prob):
@@ -164,6 +190,7 @@ class Seq2Seq(object):
         ckpt = tf.train.get_checkpoint_state(self.ckpt_path)
         # restore session
         if ckpt and ckpt.model_checkpoint_path:
+            print()
             saver.restore(sess, ckpt.model_checkpoint_path)
         # return to user
         return sess
@@ -178,5 +205,6 @@ class Seq2Seq(object):
         dec_op_v = np.array(dec_op_v).transpose([1,0,2])
         # return the index of item with highest probability
         return np.argmax(dec_op_v, axis=2)
+
 
 
